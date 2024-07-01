@@ -1,0 +1,123 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Auto Tags Resources Based on CloudTrail Create API Calls (rev:1)'
+
+Resources:
+  EventsRuleAPI:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Events rule for monitoring AWS API activity
+      EventPattern:
+        detail-type: [ "AWS API Call via CloudTrail" ]
+        detail:
+          readOnly: [ false ]
+          eventName: [{ "prefix": "Create" }, "RunInstances"]
+      Name:
+        Fn::Sub: "${AWS::StackName}-Create-API-Call"
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt LambdaFunction.Arn
+          Id: LambdaFunctionTarget
+    DependsOn:
+      - LambdaFunction
+
+  LambdaFunctionPermission: 
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: !Ref LambdaFunction
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt EventsRuleAPI.Arn
+
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.12
+      FunctionName: !Sub "AWSAutoTag-${AWS::StackName}"
+      Role: !GetAtt LambdaFunctionRole.Arn
+      Handler: index.lambda_handler
+      Timeout: 10
+      Code:
+        ZipFile: |
+          import boto3
+          import botocore
+
+          def lambda_handler(event, context):
+            sts = boto3.client('sts')
+            account_id = sts.get_caller_identity()['Account']
+            print(event)
+            if event['detail']['userIdentity']['type'] == 'AWSService':
+              return
+            try:
+              user = event['detail']['userIdentity']['arn'].split('/')[-1]
+            except KeyError:
+              try:
+                user = event['detail']['userIdentity']['principalId'].split(':')[1]
+              except KeyError:
+                return
+
+            if event['detail']['eventName'] == 'RunInstances':
+              arn = f"arn:aws:ec2:{event['region']}:{account_id}:instance/{event['detail']['responseElements']['instancesSet']['items'][0]['instanceId']}"
+            elif event['detail']['eventName'] == 'CreateBucket':
+              arn = f"arn:aws:s3:::{event['detail']['requestParameters']['bucketName']}"
+            elif event['detail']['eventName'] == 'CreateRole':
+              arn =event['detail']['responseElements']['role']['arn']
+            elif event['detail']['eventName'] == 'CreateUser':
+              arn = event['detail']['responseElements']['user']['arn']
+            elif event['detail']['eventName'] == 'CreateLoadBalancer':
+              arn = event['detail']['responseElements']['loadBalancers'][0]['loadBalancerArn']
+            elif event['detail']['eventName'] == 'CreateDBInstance':
+              arn = event['detail']['responseElements']['dBInstanceArn']
+            elif event['detail']['eventName'] == 'CreateDBCluster':
+              arn = event['detail']['responseElements']['dBClusterArn']
+            elif event['detail']['eventName'] == 'CreateFunction20150331':
+              arn = f"arn:aws:lambda:{event['region']}:{account_id}:function:{event['detail']['requestParameters']['functionName']}"
+            elif event['detail']['eventName'] == 'CreateTable':
+              arn = f"arn:aws:dynamodb:{event['region']}:{account_id}:table/{event['detail']['requestParameters']['tableName']}"
+            else:
+              return
+
+            print(arn)
+
+            client = boto3.client('resourcegroupstaggingapi', region_name=event['region'])
+            response = client.tag_resources(
+              ResourceARNList=[arn],
+              Tags={'CreatedBy': user}
+            )
+
+            print(response)
+
+            return
+
+  LambdaFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      Path: "/"
+      Policies:
+      - PolicyName: root
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+              - tag:*
+              - s3:*BucketTagging
+              - iam:Tag*
+              - elasticloadbalancing:AddTags
+              - ec2:CreateTags
+              - rds:AddTagsToResource
+              - lambda:TagResource
+              - dynamodb:TagResource
+              - cloudformation:TagResource
+              - cloudformation:DescribeStacks
+              - cloudformation:UpdateStack
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: "*"
