@@ -8,10 +8,10 @@ Auto-tag monitors events coming from CloudTrail and automatically Tag resources 
 
 1. A resource is created
 2. An event is generated in CloudTrail
-3. Event bridge received the event
+3. Event bridge receives the event
 4. Event bridge triggers a lambda
 5. Lambda finds the ARN of the resource created and the user that created (using the event data)
-6. Lambda uses resource-groups-tagging-api to tag the resource with the Created-By tag
+6. Lambda uses resource-groups-tagging-api to tag the resource with the CreatedBy tag
 
 ## Requirements
 
@@ -47,7 +47,7 @@ Caveats:
 1. Go to cloudformation and Create Stack.
 2. Select `auto-tag.cf.yml`.
 
-To test, create an S3 bucket and in a few seconds it should add a Created-By tag with your username. 
+To test, create an S3 bucket and in a few seconds it should add a CreatedBy tag with your username. 
 
 ## Troubleshooting
 
